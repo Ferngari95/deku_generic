@@ -1,0 +1,13 @@
+# Not published. Compiled for a bare-metal target in CI to prove that the
+# code `deku_generic` generates works under `#![no_std]` with only `alloc`.
+[package]
+name = "no_std_check"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deku_generic = { path = ".." }
+deku = { version = "0.20", default-features = false, features = ["alloc", "bits"] }
