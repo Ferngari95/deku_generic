@@ -1,0 +1,21 @@
+[package]
+name = "deku_generic_macros"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Proc-macro implementation for the deku_generic crate; do not depend on this directly"
+readme = "README.md"
+documentation = "https://docs.rs/deku_generic"
+keywords = ["deku", "typestate", "proc-macro"]
+categories = ["encoding", "parsing", "no-std"]
+include = ["src/**", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+proc-macro-crate = "3.0"
