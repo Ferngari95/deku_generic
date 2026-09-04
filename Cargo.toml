@@ -38,3 +38,72 @@ deku_generic_macros = { version = "=0.1.0", path = "deku_generic_macros" }
 
 [dev-dependencies]
 deku = "0.20"
+
+[lints]
+workspace = true
+
+# Levels are `warn` on purpose: CI runs with `-D warnings`, local builds stay
+# usable, and a toolchain that adds a lint does not break `git` users.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_lifetimes = "warn"
+redundant_lifetimes = "warn"
+unused_import_braces = "warn"
+unused_macro_rules = "warn"
+redundant_imports = "warn"
+unit_bindings = "warn"
+let_underscore_drop = "warn"
+explicit_outlives_requirements = "warn"
+meta_variable_misuse = "warn"
+macro_use_extern_crate = "warn"
+non_ascii_idents = "warn"
+keyword_idents_2024 = "warn"
+unnameable_types = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+# syn 2 and 3 both end up in the tree through deku's own dependencies.
+multiple_crate_versions = "allow"
+# A panic inside a proc macro is a compiler error without a span.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+unimplemented = "warn"
+todo = "warn"
+unreachable = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+# Proc macros must not write to stdout/stderr.
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+map_err_ignore = "warn"
+let_underscore_must_use = "warn"
+str_to_string = "warn"
+format_push_string = "warn"
+unused_trait_names = "warn"
+iter_over_hash_type = "warn"
+infinite_loop = "warn"
+renamed_function_params = "warn"
+redundant_type_annotations = "warn"
+unnecessary_safety_doc = "warn"
+non_ascii_literal = "warn"
+# `#[expect(.., reason = "..")]` instead of `#[allow]`, so suppressions
+# carry a justification and go stale loudly.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+[workspace.lints.rustdoc]
+unescaped_backticks = "warn"
+private_doc_tests = "warn"
+missing_crate_level_docs = "warn"
+redundant_explicit_links = "warn"
+bare_urls = "warn"

@@ -1,6 +1,12 @@
 //! The motivating example: a typestate struct that is readable in one state
 //! and writable in two.
 
+#![expect(
+    missing_docs,
+    clippy::unwrap_used,
+    reason = "tests, not held to the library lints"
+)]
+
 use std::marker::PhantomData;
 
 use deku::prelude::*;
@@ -43,7 +49,7 @@ fn unit_like_typestate_round_trips() {
 }
 
 /// Compile-time check that only the requested impls exist.
-#[allow(dead_code)]
+#[expect(dead_code, reason = "only has to type-check")]
 fn trait_surface() {
     fn reader<'a, T: DekuReader<'a> + DekuContainerRead<'a> + TryFrom<&'a [u8]>>() {}
     fn writer<T: DekuWriter + DekuContainerWrite + DekuUpdate>() {}
@@ -62,7 +68,10 @@ fn trait_surface() {
 /// Negative check through autoref specialisation: `Foo<Validated>` must not
 /// implement `DekuReader`.
 #[test]
-#[allow(clippy::needless_borrow)]
+#[expect(
+    clippy::needless_borrow,
+    reason = "the explicit borrow is what makes autoref specialisation pick the right impl"
+)]
 fn validated_is_not_readable() {
     struct Probe<T>(PhantomData<T>);
 

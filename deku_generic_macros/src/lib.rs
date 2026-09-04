@@ -2,9 +2,6 @@
 //!
 //! Do not depend on this crate directly; use `deku_generic` instead.
 
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
-
 mod attrs;
 mod expand;
 
@@ -43,7 +40,7 @@ struct AttrGroup {
 }
 
 impl Parse for AttrGroup {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let ident: Ident = input.parse()?;
         let modes = Mode::from_ident(&ident)?;
         let content;
@@ -59,7 +56,7 @@ struct AttrArgs {
 }
 
 impl Parse for AttrArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         Ok(AttrArgs {
             groups: input.parse_terminated(AttrGroup::parse, Token![,])?,
         })
@@ -75,7 +72,7 @@ struct ImplInput {
 }
 
 impl Parse for ImplInput {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         input.parse::<Token![@]>()?;
         let mode: Ident = input.parse()?;
         let modes = Mode::from_ident(&mode)?;
@@ -108,7 +105,7 @@ pub fn deku_generic(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    expand::attribute(item, requests)
+    expand::attribute(&item, &requests)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

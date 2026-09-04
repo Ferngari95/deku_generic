@@ -4,7 +4,12 @@
 //! accidental `std::` path in the macro output fails the build.
 
 #![no_std]
-#![forbid(unsafe_code)]
+#![expect(
+    missing_docs,
+    missing_debug_implementations,
+    clippy::missing_errors_doc,
+    reason = "test crate, not held to the library lints"
+)]
 
 extern crate alloc;
 

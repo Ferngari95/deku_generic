@@ -23,7 +23,7 @@ fn parse_metas(attr: &Attribute) -> syn::Result<Punctuated<Meta, Token![,]>> {
 fn meta_name(meta: &Meta) -> String {
     meta.path()
         .get_ident()
-        .map(|i| i.to_string())
+        .map(ToString::to_string)
         .unwrap_or_default()
 }
 
@@ -88,7 +88,7 @@ pub(crate) fn parse_struct_attrs(attrs: &[Attribute]) -> syn::Result<StructAttrs
     Ok(out)
 }
 
-/// Error if the field is `#[deku(temp)]`, which deku_generic cannot support
+/// Error if the field is `#[deku(temp)]`, which `deku_generic` cannot support
 /// because it changes the field list of the real struct.
 pub(crate) fn check_field_supported(attrs: &[Attribute]) -> syn::Result<()> {
     for attr in attrs.iter().filter(|a| is_deku(a)) {
@@ -172,8 +172,15 @@ pub(crate) fn mirror_field_attrs(
 }
 
 fn rewrite_for_write(meta: Meta, name: &str, field_names: &[String]) -> syn::Result<Meta> {
-    let Some(lit) = str_value(&meta) else {
-        return Ok(meta);
+    let mut nv = match meta {
+        Meta::NameValue(nv) => nv,
+        other => return Ok(other),
+    };
+    let Expr::Lit(ExprLit {
+        lit: Lit::Str(lit), ..
+    }) = &nv.value
+    else {
+        return Ok(Meta::NameValue(nv));
     };
     let span = lit.span();
     let value = lit.value();
@@ -195,12 +202,9 @@ fn rewrite_for_write(meta: Meta, name: &str, field_names: &[String]) -> syn::Res
         }
         parts.join(", ")
     } else {
-        return Ok(meta);
+        return Ok(Meta::NameValue(nv));
     };
 
-    let Meta::NameValue(mut nv) = meta else {
-        unreachable!("str_value only matches Meta::NameValue");
-    };
     nv.value = Expr::Lit(ExprLit {
         attrs: Vec::new(),
         lit: Lit::Str(LitStr::new(&new_value, span)),
@@ -213,15 +217,15 @@ fn wrap_expr(expr: &str, field_names: &[String], prefix: &str) -> syn::Result<St
     let tokens: TokenStream = expr.parse()?;
     let mut used = Vec::new();
     collect_idents(&tokens, &mut used);
-    let rebinds: String = field_names
+    let rebinds: Vec<String> = field_names
         .iter()
-        .filter(|f| used.iter().any(|u| u == *f))
-        .map(|f| format!("let {f} = *{f}; "))
+        .filter(|f| used.contains(f))
+        .map(|f| format!("let {f} = *{f};"))
         .collect();
     if rebinds.is_empty() {
         return Ok(expr.to_owned());
     }
-    Ok(format!("{prefix}{{ {rebinds}({expr}) }}"))
+    Ok(format!("{prefix}{{ {} ({expr}) }}", rebinds.join(" ")))
 }
 
 fn collect_idents(tokens: &TokenStream, out: &mut Vec<String>) {

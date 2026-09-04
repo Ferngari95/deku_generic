@@ -86,7 +86,7 @@
 //! A `PhantomData<..>` field with no `#[deku]` attribute is treated as
 //! `#[deku(skip)]`; deku has no impl for `PhantomData`.
 //!
-//! # no_std
+//! # `no_std`
 //!
 //! The crate is `#![no_std]`. The generated code needs `alloc` for
 //! `to_bytes` and the `Vec<u8>` conversion, so use deku without default
@@ -101,7 +101,7 @@
 //! Add deku's `bits` feature for `bits = ..` attributes. CI builds a check
 //! crate for `thumbv6m-none-eabi`.
 //!
-//! deku_generic 0.1 targets deku 0.20; edition 2024, MSRV 1.85.
+//! `deku_generic` 0.1 targets deku 0.20; edition 2024, MSRV 1.85.
 //!
 //! # How it works
 //!
@@ -138,8 +138,6 @@
 //!   deku 0.20 that means they need a `ctx`.
 
 #![no_std]
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
 
 pub use deku_generic_macros::{
     deku_generic, impl_deku_read, impl_deku_read_write, impl_deku_write,

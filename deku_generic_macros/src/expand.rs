@@ -15,9 +15,11 @@
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
+use syn::punctuated::Punctuated;
 use syn::{
-    Attribute, Fields, GenericArgument, GenericParam, Ident, Index, ItemStruct, Lifetime,
-    LifetimeParam, Path, PathArguments, Type,
+    AngleBracketedGenericArguments, Attribute, ConstParam, Fields, GenericArgument, GenericParam,
+    Ident, Index, ItemStruct, Lifetime, LifetimeParam, Path, PathArguments, PathSegment, Token,
+    Type, TypeParam, WhereClause,
 };
 
 use crate::Mode;
@@ -30,14 +32,14 @@ pub(crate) fn helper_ident(ident: &Ident) -> Ident {
 }
 
 /// Expansion of the `#[deku_generic(...)]` attribute.
-pub(crate) fn attribute(item: ItemStruct, requests: Vec<(Mode, Path)>) -> syn::Result<TokenStream> {
-    for field in item.fields.iter() {
+pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Result<TokenStream> {
+    for field in &item.fields {
         attrs::check_field_supported(&field.attrs)?;
     }
     attrs::parse_struct_attrs(&item.attrs)?;
 
-    let captured = only_deku_attrs(&item);
-    let real = without_deku_attrs(&item);
+    let captured = only_deku_attrs(item);
+    let real = without_deku_attrs(item);
     let helper = helper_ident(&item.ident);
     let dg = crate::self_path();
 
@@ -56,7 +58,7 @@ pub(crate) fn attribute(item: ItemStruct, requests: Vec<(Mode, Path)>) -> syn::R
         pub(crate) use #helper;
     };
 
-    for (mode, target) in &requests {
+    for (mode, target) in requests {
         out.extend(instantiate(*mode, target, &captured)?);
     }
     Ok(out)
@@ -65,7 +67,7 @@ pub(crate) fn attribute(item: ItemStruct, requests: Vec<(Mode, Path)>) -> syn::R
 fn only_deku_attrs(item: &ItemStruct) -> ItemStruct {
     let mut item = item.clone();
     item.attrs.retain(attrs::is_deku);
-    for field in item.fields.iter_mut() {
+    for field in &mut item.fields {
         field.attrs.retain(attrs::is_deku);
     }
     item
@@ -74,23 +76,10 @@ fn only_deku_attrs(item: &ItemStruct) -> ItemStruct {
 fn without_deku_attrs(item: &ItemStruct) -> ItemStruct {
     let mut item = item.clone();
     item.attrs.retain(|a| !attrs::is_deku(a));
-    for field in item.fields.iter_mut() {
+    for field in &mut item.fields {
         field.attrs.retain(|a| !attrs::is_deku(a));
     }
     item
-}
-
-/// One field of the struct plus the two names it goes by.
-struct FieldInfo<'a> {
-    ident: Option<&'a Ident>,
-    index: Index,
-    ty: &'a Type,
-    attrs: &'a [Attribute],
-    /// What deku's derive calls the field inside attribute expressions
-    /// (`name`, or `field_0` for tuple structs).
-    deku_name: String,
-    /// Local binding used in the generated conversion code.
-    local: Ident,
 }
 
 /// Generate all impls of `mode` for the concrete type `target`.
@@ -99,8 +88,6 @@ pub(crate) fn instantiate(
     target: &Path,
     item: &ItemStruct,
 ) -> syn::Result<TokenStream> {
-    let deku = crate::deku_path();
-
     let last = target
         .segments
         .last()
@@ -112,17 +99,40 @@ pub(crate) fn instantiate(
         ));
     }
 
-    // ---- generic arguments -> alias items -------------------------------
+    let (lifetime_args, other_args) = split_args(last)?;
+    let lifetime_params: Vec<&LifetimeParam> = item.generics.lifetimes().collect();
+    check_lifetime_args(last, item, &lifetime_args, &lifetime_params)?;
+    let target = normalise_target(target, &lifetime_params, &other_args);
+    let (outer_aliases, inner_aliases) = alias_items(last, item, &other_args)?;
 
-    let mut lifetime_args = Vec::new();
-    let mut other_args = Vec::new();
+    let instance = Instance::new(target, item, lifetime_params)?;
+    let body = match mode {
+        Mode::Read => instance.read()?,
+        Mode::Write => instance.write()?,
+    };
+
+    Ok(quote! {
+        const _: () = {
+            #outer_aliases
+            const _: () = {
+                #inner_aliases
+                #body
+            };
+        };
+    })
+}
+
+/// Split `Foo<'a, A, 4>` into its lifetime arguments and the rest.
+fn split_args(last: &PathSegment) -> syn::Result<(Vec<&Lifetime>, Vec<&GenericArgument>)> {
+    let mut lifetimes = Vec::new();
+    let mut others = Vec::new();
     match &last.arguments {
         PathArguments::None => {}
         PathArguments::AngleBracketed(ab) => {
             for arg in &ab.args {
                 match arg {
-                    GenericArgument::Lifetime(lt) => lifetime_args.push(lt),
-                    GenericArgument::Type(_) | GenericArgument::Const(_) => other_args.push(arg),
+                    GenericArgument::Lifetime(lt) => lifetimes.push(lt),
+                    GenericArgument::Type(_) | GenericArgument::Const(_) => others.push(arg),
                     other => {
                         return Err(syn::Error::new_spanned(
                             other,
@@ -139,29 +149,29 @@ pub(crate) fn instantiate(
             ));
         }
     }
+    Ok((lifetimes, others))
+}
 
-    let lifetime_params: Vec<&LifetimeParam> = item.generics.lifetimes().collect();
-    let params: Vec<&GenericParam> = item
-        .generics
-        .params
-        .iter()
-        .filter(|p| !matches!(p, GenericParam::Lifetime(_)))
-        .collect();
-
-    if !lifetime_args.is_empty() && lifetime_args.len() != lifetime_params.len() {
+/// The impls are generic over the struct's own lifetime names, so lifetimes
+/// given by the caller must be those names (or `'_`), or be left out.
+fn check_lifetime_args(
+    last: &PathSegment,
+    item: &ItemStruct,
+    given: &[&Lifetime],
+    params: &[&LifetimeParam],
+) -> syn::Result<()> {
+    if !given.is_empty() && given.len() != params.len() {
         return Err(syn::Error::new_spanned(
             last,
             format!(
                 "`{}` has {} lifetime parameter(s), but {} were given",
                 item.ident,
-                lifetime_params.len(),
-                lifetime_args.len()
+                params.len(),
+                given.len()
             ),
         ));
     }
-    // The impls are generic over the struct's own lifetime names, so given
-    // lifetimes must be those names (or `'_`).
-    for (given, param) in lifetime_args.iter().zip(&lifetime_params) {
+    for (given, param) in given.iter().zip(params) {
         if given.ident != "_" && given.ident != param.lifetime.ident {
             return Err(syn::Error::new_spanned(
                 given,
@@ -172,308 +182,393 @@ pub(crate) fn instantiate(
             ));
         }
     }
-    // Normalise the target type to `Foo<'a, 'b, A, B>` with the struct's
-    // lifetime names, whatever the caller wrote.
-    let target = {
-        let mut target = target.clone();
-        let last = target.segments.last_mut().expect("checked above");
-        let mut args: syn::punctuated::Punctuated<GenericArgument, syn::Token![,]> =
-            syn::punctuated::Punctuated::new();
-        for lp in &lifetime_params {
-            args.push(GenericArgument::Lifetime(lp.lifetime.clone()));
-        }
-        for arg in &other_args {
-            args.push((*arg).clone());
-        }
-        last.arguments = if args.is_empty() {
-            PathArguments::None
-        } else {
-            PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-                colon2_token: None,
-                lt_token: Default::default(),
-                args,
-                gt_token: Default::default(),
-            })
-        };
-        target
+    Ok(())
+}
+
+/// `Foo<'a, 'b, A, B>` with the struct's lifetime names, whatever the caller
+/// wrote.
+fn normalise_target(
+    target: &Path,
+    lifetime_params: &[&LifetimeParam],
+    other_args: &[&GenericArgument],
+) -> Path {
+    let mut args: Punctuated<GenericArgument, Token![,]> = Punctuated::new();
+    for lp in lifetime_params {
+        args.push(GenericArgument::Lifetime(lp.lifetime.clone()));
+    }
+    for arg in other_args {
+        args.push((*arg).clone());
+    }
+    let arguments = if args.is_empty() {
+        PathArguments::None
+    } else {
+        PathArguments::AngleBracketed(AngleBracketedGenericArguments {
+            colon2_token: None,
+            lt_token: syn::token::Lt::default(),
+            args,
+            gt_token: syn::token::Gt::default(),
+        })
     };
-    let target = &target;
-    if other_args.len() > params.len() {
+    let mut target = target.clone();
+    if let Some(last) = target.segments.last_mut() {
+        last.arguments = arguments;
+    }
+    target
+}
+
+/// Alias items binding each type/const parameter name to its argument.
+///
+/// Two levels: the outer block binds `__DekuGenericArgN` to the argument as
+/// written by the caller, the inner block binds the parameter name to that.
+/// Doing it in one step would break when an argument is spelled the same as
+/// the parameter (`type State = State;`).
+fn alias_items(
+    last: &PathSegment,
+    item: &ItemStruct,
+    other_args: &[&GenericArgument],
+) -> syn::Result<(TokenStream, TokenStream)> {
+    let param_count = item
+        .generics
+        .params
+        .iter()
+        .filter(|p| !matches!(p, GenericParam::Lifetime(_)))
+        .count();
+    if other_args.len() > param_count {
         return Err(syn::Error::new_spanned(
             last,
             format!(
                 "`{}` has {} type/const parameter(s), but {} were given",
                 item.ident,
-                params.len(),
+                param_count,
                 other_args.len()
             ),
         ));
     }
 
-    let mut outer_aliases = TokenStream::new();
-    let mut inner_aliases = TokenStream::new();
-    for (i, param) in params.iter().enumerate() {
+    let mut outer = TokenStream::new();
+    let mut inner = TokenStream::new();
+    let mut i = 0;
+    for param in &item.generics.params {
         let arg = other_args.get(i).copied();
         match param {
+            GenericParam::Lifetime(_) => continue,
             GenericParam::Type(tp) => {
+                let ty = type_arg(last, tp, arg)?;
                 let name = &tp.ident;
-                let ty = match (arg, &tp.default) {
-                    (Some(GenericArgument::Type(t)), _) => quote!(#t),
-                    (Some(other), _) => {
-                        return Err(syn::Error::new_spanned(
-                            other,
-                            format!("expected a type for parameter `{name}`"),
-                        ));
-                    }
-                    (None, Some(default)) => quote!(#default),
-                    (None, None) => {
-                        return Err(syn::Error::new_spanned(
-                            last,
-                            format!("missing argument for type parameter `{name}`"),
-                        ));
-                    }
-                };
-                let outer = format_ident!("__DekuGenericArg{}", i);
-                outer_aliases.extend(quote! {
+                let alias = format_ident!("__DekuGenericArg{}", i);
+                outer.extend(quote! {
                     #[allow(dead_code, non_camel_case_types)]
-                    type #outer = #ty;
+                    type #alias = #ty;
                 });
-                inner_aliases.extend(quote! {
+                inner.extend(quote! {
                     #[allow(dead_code, non_camel_case_types)]
-                    type #name = #outer;
+                    type #name = #alias;
                 });
             }
             GenericParam::Const(cp) => {
+                let value = const_arg(last, cp, arg)?;
                 let name = &cp.ident;
                 let cty = &cp.ty;
-                let value = match (arg, &cp.default) {
-                    (Some(GenericArgument::Const(e)), _) => quote!(#e),
-                    // A bare path such as `N` or `LEN` parses as a type.
-                    (Some(GenericArgument::Type(t)), _) => quote!(#t),
-                    (Some(other), _) => {
-                        return Err(syn::Error::new_spanned(
-                            other,
-                            format!("expected a const for parameter `{name}`"),
-                        ));
-                    }
-                    (None, Some(default)) => quote!(#default),
-                    (None, None) => {
-                        return Err(syn::Error::new_spanned(
-                            last,
-                            format!("missing argument for const parameter `{name}`"),
-                        ));
-                    }
-                };
-                let outer = format_ident!("__DEKU_GENERIC_ARG_{}", i);
-                outer_aliases.extend(quote! {
+                let alias = format_ident!("__DEKU_GENERIC_ARG_{}", i);
+                outer.extend(quote! {
                     #[allow(dead_code, non_upper_case_globals)]
-                    const #outer: #cty = #value;
+                    const #alias: #cty = #value;
                 });
-                inner_aliases.extend(quote! {
+                inner.extend(quote! {
                     #[allow(dead_code, non_upper_case_globals)]
-                    const #name: #cty = #outer;
+                    const #name: #cty = #alias;
                 });
             }
-            GenericParam::Lifetime(_) => unreachable!("filtered out above"),
         }
+        i += 1;
     }
-
-    // ---- shared pieces ------------------------------------------------------
-
-    let fields: Vec<FieldInfo> = item
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let local = match &f.ident {
-                Some(id) => {
-                    let mut id = id.clone();
-                    id.set_span(Span::call_site());
-                    id
-                }
-                None => format_ident!("__dg_field_{}", i),
-            };
-            FieldInfo {
-                ident: f.ident.as_ref(),
-                index: Index::from(i),
-                ty: &f.ty,
-                attrs: &f.attrs,
-                deku_name: match &f.ident {
-                    Some(id) => id.to_string(),
-                    None => format!("field_{i}"),
-                },
-                local,
-            }
-        })
-        .collect();
-    let field_names: Vec<String> = fields.iter().map(|f| f.deku_name.clone()).collect();
-    let locals: Vec<&Ident> = fields.iter().map(|f| &f.local).collect();
-
-    let struct_deku_attrs: Vec<&Attribute> =
-        item.attrs.iter().filter(|a| attrs::is_deku(a)).collect();
-    let struct_attrs = attrs::parse_struct_attrs(&item.attrs)?;
-    let where_clause = &item.generics.where_clause;
-
-    let lifetime_names: Vec<&Lifetime> = lifetime_params.iter().map(|l| &l.lifetime).collect();
-    let has_lifetimes = !lifetime_params.is_empty();
-
-    let ctx_ty = match &struct_attrs.ctx {
-        None => quote!(()),
-        Some(types) if types.len() == 1 => {
-            let t = &types[0];
-            quote!(#t)
-        }
-        Some(types) => quote!((#(#types),*)),
-    };
-    // deku implements the `()` flavour of the traits when there is no ctx,
-    // or when `ctx_default` supplies one.
-    let has_unit_ctx = struct_attrs.ctx.is_none() || struct_attrs.ctx_default;
-    let mut ctx_list = vec![ctx_ty];
-    if struct_attrs.ctx.is_some() && struct_attrs.ctx_default {
-        ctx_list.push(quote!(()));
-    }
-
-    let body = match mode {
-        Mode::Read => emit_read(
-            &deku,
-            target,
-            item,
-            &fields,
-            &locals,
-            &field_names,
-            &struct_deku_attrs,
-            where_clause.as_ref(),
-            &lifetime_params,
-            &lifetime_names,
-            has_lifetimes,
-            &ctx_list,
-            has_unit_ctx,
-        )?,
-        Mode::Write => emit_write(
-            &deku,
-            target,
-            item,
-            &fields,
-            &field_names,
-            &struct_deku_attrs,
-            where_clause.as_ref(),
-            &lifetime_params,
-            &lifetime_names,
-            has_lifetimes,
-            &ctx_list,
-            has_unit_ctx,
-        )?,
-    };
-
-    Ok(quote! {
-        const _: () = {
-            #outer_aliases
-            const _: () = {
-                #inner_aliases
-                #body
-            };
-        };
-    })
+    Ok((outer, inner))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn emit_read(
-    deku: &TokenStream,
-    target: &Path,
-    item: &ItemStruct,
-    fields: &[FieldInfo],
-    locals: &[&Ident],
-    field_names: &[String],
-    struct_deku_attrs: &[&Attribute],
-    where_clause: Option<&syn::WhereClause>,
-    lifetime_params: &[&LifetimeParam],
-    lifetime_names: &[&Lifetime],
-    has_lifetimes: bool,
-    ctx_list: &[TokenStream],
-    has_unit_ctx: bool,
+fn type_arg(
+    last: &PathSegment,
+    param: &TypeParam,
+    arg: Option<&GenericArgument>,
 ) -> syn::Result<TokenStream> {
-    let mirror = format_ident!("__DekuGenericRead");
-
-    let reader_lt: Lifetime = lifetime_names
-        .first()
-        .map(|l| (*l).clone())
-        .unwrap_or_else(|| Lifetime::new("'__deku", Span::call_site()));
-    let impl_generics = if has_lifetimes {
-        quote!(<#(#lifetime_params),*>)
-    } else {
-        quote!(<'__deku>)
-    };
-    let mirror_generics = if has_lifetimes {
-        quote!(<#(#lifetime_params),*>)
-    } else {
-        quote!()
-    };
-    let mirror_ty = if has_lifetimes {
-        quote!(#mirror<#(#lifetime_names),*>)
-    } else {
-        quote!(#mirror)
-    };
-
-    // -- mirror struct
-    let mut mirror_fields = Vec::new();
-    for f in fields {
-        let fattrs = field_attrs_with_phantom(f, MirrorKind::Read, field_names)?;
-        let ty = f.ty;
-        mirror_fields.push(match f.ident {
-            Some(id) => quote!(#(#fattrs)* #id: #ty),
-            None => quote!(#(#fattrs)* #ty),
-        });
+    let name = &param.ident;
+    match (arg, &param.default) {
+        (Some(GenericArgument::Type(t)), _) => Ok(quote!(#t)),
+        (Some(other), _) => Err(syn::Error::new_spanned(
+            other,
+            format!("expected a type for parameter `{name}`"),
+        )),
+        (None, Some(default)) => Ok(quote!(#default)),
+        (None, None) => Err(syn::Error::new_spanned(
+            last,
+            format!("missing argument for type parameter `{name}`"),
+        )),
     }
-    let mirror_def = mirror_struct(
-        deku,
-        "DekuRead",
-        &mirror,
-        &mirror_generics,
-        where_clause,
-        &item.fields,
-        &mirror_fields,
-        struct_deku_attrs,
-    );
+}
 
-    // -- mirror -> Self conversion
-    let convert = match &item.fields {
-        Fields::Named(_) => quote! {
-            let #mirror { #(#locals),* } = __dg_mirror;
-            Self { #(#locals),* }
-        },
-        Fields::Unnamed(_) => quote! {
-            let #mirror ( #(#locals),* ) = __dg_mirror;
-            Self ( #(#locals),* )
-        },
-        Fields::Unit => quote! {
-            let _ = __dg_mirror;
-            Self
-        },
-    };
+fn const_arg(
+    last: &PathSegment,
+    param: &ConstParam,
+    arg: Option<&GenericArgument>,
+) -> syn::Result<TokenStream> {
+    let name = &param.ident;
+    match (arg, &param.default) {
+        (Some(GenericArgument::Const(e)), _) => Ok(quote!(#e)),
+        // A bare path such as `N` or `LEN` parses as a type.
+        (Some(GenericArgument::Type(t)), _) => Ok(quote!(#t)),
+        (Some(other), _) => Err(syn::Error::new_spanned(
+            other,
+            format!("expected a const for parameter `{name}`"),
+        )),
+        (None, Some(default)) => Ok(quote!(#default)),
+        (None, None) => Err(syn::Error::new_spanned(
+            last,
+            format!("missing argument for const parameter `{name}`"),
+        )),
+    }
+}
 
-    let mut out = mirror_def;
+/// One field of the struct plus the two names it goes by.
+struct FieldInfo<'a> {
+    ident: Option<&'a Ident>,
+    index: Index,
+    ty: &'a Type,
+    attrs: &'a [Attribute],
+    /// What deku's derive calls the field inside attribute expressions
+    /// (`name`, or `field_0` for tuple structs).
+    deku_name: String,
+    /// Local binding used in the generated conversion code.
+    local: Ident,
+}
 
-    for ctx in ctx_list {
-        out.extend(quote! {
-            #[automatically_derived]
-            impl #impl_generics #deku::DekuReader<#reader_lt, #ctx> for #target #where_clause {
-                #[inline]
-                fn from_reader_with_ctx<__R: #deku::no_std_io::Read + #deku::no_std_io::Seek>(
-                    __deku_reader: &mut #deku::reader::Reader<__R>,
-                    __deku_ctx: #ctx,
-                ) -> ::core::result::Result<Self, #deku::DekuError> {
-                    let __dg_mirror = <#mirror_ty as #deku::DekuReader<#reader_lt, #ctx>>::from_reader_with_ctx(
-                        __deku_reader,
-                        __deku_ctx,
-                    )?;
-                    ::core::result::Result::Ok({ #convert })
+impl<'a> FieldInfo<'a> {
+    fn new(i: usize, field: &'a syn::Field) -> Self {
+        let local = if let Some(id) = &field.ident {
+            let mut id = id.clone();
+            id.set_span(Span::call_site());
+            id
+        } else {
+            format_ident!("__dg_field_{}", i)
+        };
+        FieldInfo {
+            ident: field.ident.as_ref(),
+            index: Index::from(i),
+            ty: &field.ty,
+            attrs: &field.attrs,
+            deku_name: field
+                .ident
+                .as_ref()
+                .map_or_else(|| format!("field_{i}"), ToString::to_string),
+            local,
+        }
+    }
+
+    /// Attributes for the mirror copy of this field. deku has no impls for
+    /// `PhantomData`, so a `PhantomData<..>` field without any `#[deku(...)]`
+    /// attribute of its own is treated as `#[deku(skip)]`.
+    fn mirror_attrs(
+        &self,
+        kind: MirrorKind,
+        field_names: &[String],
+    ) -> syn::Result<Vec<Attribute>> {
+        let mut fattrs = attrs::mirror_field_attrs(self.attrs, kind, field_names)?;
+        if fattrs.is_empty() && is_phantom_data(self.ty) {
+            fattrs.push(syn::parse_quote!(#[deku(skip)]));
+        }
+        Ok(fattrs)
+    }
+}
+
+fn is_phantom_data(ty: &Type) -> bool {
+    match ty {
+        Type::Path(p) => p
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "PhantomData"),
+        Type::Group(g) => is_phantom_data(&g.elem),
+        Type::Paren(p) => is_phantom_data(&p.elem),
+        _ => false,
+    }
+}
+
+/// Everything the read and write emitters need about one instantiation.
+struct Instance<'a> {
+    deku: TokenStream,
+    target: Path,
+    item: &'a ItemStruct,
+    fields: Vec<FieldInfo<'a>>,
+    field_names: Vec<String>,
+    struct_deku_attrs: Vec<&'a Attribute>,
+    where_clause: Option<&'a WhereClause>,
+    lifetime_params: Vec<&'a LifetimeParam>,
+    /// Ctx types deku implements the traits for: the declared `ctx`, plus
+    /// `()` when there is a `ctx_default`.
+    ctx_list: Vec<TokenStream>,
+    /// Whether the `()` flavour exists, and with it the container impls.
+    has_unit_ctx: bool,
+}
+
+impl<'a> Instance<'a> {
+    fn new(
+        target: Path,
+        item: &'a ItemStruct,
+        lifetime_params: Vec<&'a LifetimeParam>,
+    ) -> syn::Result<Self> {
+        let fields: Vec<FieldInfo<'a>> = item
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| FieldInfo::new(i, f))
+            .collect();
+        let field_names = fields.iter().map(|f| f.deku_name.clone()).collect();
+
+        let struct_attrs = attrs::parse_struct_attrs(&item.attrs)?;
+        let ctx_ty = match struct_attrs.ctx.as_deref() {
+            None => quote!(()),
+            Some([t]) => quote!(#t),
+            Some(types) => quote!((#(#types),*)),
+        };
+        let has_unit_ctx = struct_attrs.ctx.is_none() || struct_attrs.ctx_default;
+        let mut ctx_list = vec![ctx_ty];
+        if struct_attrs.ctx.is_some() && struct_attrs.ctx_default {
+            ctx_list.push(quote!(()));
+        }
+
+        Ok(Instance {
+            deku: crate::deku_path(),
+            target,
+            item,
+            fields,
+            field_names,
+            struct_deku_attrs: item.attrs.iter().filter(|a| attrs::is_deku(a)).collect(),
+            where_clause: item.generics.where_clause.as_ref(),
+            lifetime_params,
+            ctx_list,
+            has_unit_ctx,
+        })
+    }
+
+    fn lifetime_names(&self) -> impl Iterator<Item = &'a Lifetime> + '_ {
+        self.lifetime_params.iter().map(|l| &l.lifetime)
+    }
+
+    /// `#[derive(deku::<derive>)] struct <name><generics> where .. { fields }`
+    fn mirror_struct(
+        &self,
+        derive: &str,
+        name: &Ident,
+        generics: &TokenStream,
+        fields: &[TokenStream],
+    ) -> TokenStream {
+        let deku = &self.deku;
+        let derive = format_ident!("{}", derive);
+        let attrs = &self.struct_deku_attrs;
+        let where_clause = self.where_clause;
+        let head = quote! {
+            #[derive(#deku::#derive)]
+            #(#attrs)*
+            #[allow(dead_code, non_camel_case_types, non_snake_case, clippy::all)]
+        };
+        match self.item.fields {
+            Fields::Named(_) => quote! {
+                #head
+                struct #name #generics #where_clause { #(#fields,)* }
+            },
+            Fields::Unnamed(_) => quote! {
+                #head
+                struct #name #generics ( #(#fields,)* ) #where_clause;
+            },
+            Fields::Unit => quote! {
+                #head
+                struct #name #generics #where_clause;
+            },
+        }
+    }
+
+    /// Mirror struct plus `DekuReader`, `DekuContainerRead` and
+    /// `TryFrom<&[u8]>` impls.
+    fn read(&self) -> syn::Result<TokenStream> {
+        let deku = &self.deku;
+        let target = &self.target;
+        let where_clause = self.where_clause;
+        let mirror = format_ident!("__DekuGenericRead");
+
+        let lifetime_params = &self.lifetime_params;
+        let lifetime_names: Vec<&Lifetime> = self.lifetime_names().collect();
+        let reader_lt = lifetime_names.first().map_or_else(
+            || Lifetime::new("'__deku", Span::call_site()),
+            |l| (*l).clone(),
+        );
+        let (impl_generics, mirror_generics, mirror_ty) = if lifetime_params.is_empty() {
+            (quote!(<'__deku>), quote!(), quote!(#mirror))
+        } else {
+            (
+                quote!(<#(#lifetime_params),*>),
+                quote!(<#(#lifetime_params),*>),
+                quote!(#mirror<#(#lifetime_names),*>),
+            )
+        };
+
+        let mut mirror_fields = Vec::new();
+        for f in &self.fields {
+            let fattrs = f.mirror_attrs(MirrorKind::Read, &self.field_names)?;
+            let ty = f.ty;
+            mirror_fields.push(if let Some(id) = f.ident {
+                quote!(#(#fattrs)* #id: #ty)
+            } else {
+                quote!(#(#fattrs)* #ty)
+            });
+        }
+        let mut out = self.mirror_struct("DekuRead", &mirror, &mirror_generics, &mirror_fields);
+
+        let locals: Vec<&Ident> = self.fields.iter().map(|f| &f.local).collect();
+        let convert = match self.item.fields {
+            Fields::Named(_) => quote! {
+                let #mirror { #(#locals),* } = __dg_mirror;
+                Self { #(#locals),* }
+            },
+            Fields::Unnamed(_) => quote! {
+                let #mirror ( #(#locals),* ) = __dg_mirror;
+                Self ( #(#locals),* )
+            },
+            Fields::Unit => quote! {
+                let _ = __dg_mirror;
+                Self
+            },
+        };
+
+        for ctx in &self.ctx_list {
+            out.extend(quote! {
+                #[automatically_derived]
+                impl #impl_generics #deku::DekuReader<#reader_lt, #ctx> for #target #where_clause {
+                    #[inline]
+                    fn from_reader_with_ctx<__R: #deku::no_std_io::Read + #deku::no_std_io::Seek>(
+                        __deku_reader: &mut #deku::reader::Reader<__R>,
+                        __deku_ctx: #ctx,
+                    ) -> ::core::result::Result<Self, #deku::DekuError> {
+                        let __dg_mirror = <#mirror_ty as #deku::DekuReader<#reader_lt, #ctx>>::from_reader_with_ctx(
+                            __deku_reader,
+                            __deku_ctx,
+                        )?;
+                        ::core::result::Result::Ok({ #convert })
+                    }
                 }
-            }
-        });
+            });
+        }
+
+        if self.has_unit_ctx {
+            out.extend(self.container_read(&impl_generics, &reader_lt));
+        }
+        Ok(out)
     }
 
-    if has_unit_ctx {
-        out.extend(quote! {
+    /// `DekuContainerRead` and `TryFrom<&[u8]>`, in terms of the
+    /// `DekuReader<'_, ()>` impl. Same bodies as deku's derive.
+    fn container_read(&self, impl_generics: &TokenStream, reader_lt: &Lifetime) -> TokenStream {
+        let deku = &self.deku;
+        let target = &self.target;
+        let where_clause = self.where_clause;
+        quote! {
             #[automatically_derived]
             impl #impl_generics #deku::DekuContainerRead<#reader_lt> for #target #where_clause {
                 // Like deku's derive, accept any reader lifetime here rather
@@ -539,123 +634,115 @@ fn emit_read(
                     ::core::result::Result::Ok(__deku_res)
                 }
             }
-        });
+        }
     }
 
-    Ok(out)
-}
+    /// Mirror struct plus `DekuWriter`, `DekuUpdate`, `DekuContainerWrite`
+    /// and `TryFrom<Self> for Vec<u8>` impls.
+    fn write(&self) -> syn::Result<TokenStream> {
+        let deku = &self.deku;
+        let target = &self.target;
+        let where_clause = self.where_clause;
+        let mirror = format_ident!("__DekuGenericWrite");
+        let ref_lt = Lifetime::new("'__dg_ref", Span::call_site());
 
-#[allow(clippy::too_many_arguments)]
-fn emit_write(
-    deku: &TokenStream,
-    target: &Path,
-    item: &ItemStruct,
-    fields: &[FieldInfo],
-    field_names: &[String],
-    struct_deku_attrs: &[&Attribute],
-    where_clause: Option<&syn::WhereClause>,
-    lifetime_params: &[&LifetimeParam],
-    lifetime_names: &[&Lifetime],
-    has_lifetimes: bool,
-    ctx_list: &[TokenStream],
-    has_unit_ctx: bool,
-) -> syn::Result<TokenStream> {
-    let mirror = format_ident!("__DekuGenericWrite");
-    let ref_lt = Lifetime::new("'__dg_ref", Span::call_site());
+        let lifetime_params = &self.lifetime_params;
+        let impl_generics = if lifetime_params.is_empty() {
+            quote!()
+        } else {
+            quote!(<#(#lifetime_params),*>)
+        };
+        let mirror_generics = quote!(<#ref_lt, #(#lifetime_params),*>);
 
-    let impl_generics = if has_lifetimes {
-        quote!(<#(#lifetime_params),*>)
-    } else {
-        quote!()
-    };
-    let mirror_generics = quote!(<#ref_lt, #(#lifetime_params),*>);
-    let _ = lifetime_names;
-
-    // -- mirror struct borrowing every field
-    let mut mirror_fields = Vec::new();
-    for f in fields {
-        let fattrs = field_attrs_with_phantom(f, MirrorKind::Write, field_names)?;
-        let ty = f.ty;
-        mirror_fields.push(match f.ident {
-            Some(id) => quote!(#(#fattrs)* #id: &#ref_lt #ty),
-            None => quote!(#(#fattrs)* &#ref_lt #ty),
-        });
-    }
-    let mirror_def = mirror_struct(
-        deku,
-        "DekuWrite",
-        &mirror,
-        &mirror_generics,
-        where_clause,
-        &item.fields,
-        &mirror_fields,
-        struct_deku_attrs,
-    );
-
-    // -- &Self -> mirror
-    let construct = match &item.fields {
-        Fields::Named(_) => {
-            let idents = fields.iter().map(|f| f.ident.expect("named field"));
-            quote!(#mirror { #(#idents: &self.#idents),* })
-        }
-        Fields::Unnamed(_) => {
-            let indices = fields.iter().map(|f| &f.index);
-            quote!(#mirror ( #(&self.#indices),* ))
-        }
-        Fields::Unit => quote!(#mirror),
-    };
-
-    // -- DekuUpdate on the real struct
-    let mut updates = Vec::new();
-    for f in fields {
-        if let Some(expr) = attrs::field_update(f.attrs)? {
-            let access = match f.ident {
-                Some(id) => quote!(#id),
-                None => {
-                    let idx = &f.index;
-                    quote!(#idx)
-                }
-            };
-            updates.push(quote! {
-                self.#access = (#expr).try_into()?;
+        let mut mirror_fields = Vec::new();
+        for f in &self.fields {
+            let fattrs = f.mirror_attrs(MirrorKind::Write, &self.field_names)?;
+            let ty = f.ty;
+            mirror_fields.push(if let Some(id) = f.ident {
+                quote!(#(#fattrs)* #id: &#ref_lt #ty)
+            } else {
+                quote!(#(#fattrs)* &#ref_lt #ty)
             });
         }
-    }
+        let mut out = self.mirror_struct("DekuWrite", &mirror, &mirror_generics, &mirror_fields);
 
-    let mut out = mirror_def;
-
-    for ctx in ctx_list {
-        out.extend(quote! {
-            #[automatically_derived]
-            impl #impl_generics #deku::DekuWriter<#ctx> for #target #where_clause {
-                #[inline]
-                fn to_writer<__W: #deku::no_std_io::Write + #deku::no_std_io::Seek>(
-                    &self,
-                    __deku_writer: &mut #deku::writer::Writer<__W>,
-                    __deku_ctx: #ctx,
-                ) -> ::core::result::Result<(), #deku::DekuError> {
-                    let __dg_mirror = #construct;
-                    #deku::DekuWriter::<#ctx>::to_writer(&__dg_mirror, __deku_writer, __deku_ctx)
-                }
+        let construct = match self.item.fields {
+            Fields::Named(_) => {
+                let idents = self.fields.iter().filter_map(|f| f.ident);
+                quote!(#mirror { #(#idents: &self.#idents),* })
             }
-        });
+            Fields::Unnamed(_) => {
+                let indices = self.fields.iter().map(|f| &f.index);
+                quote!(#mirror ( #(&self.#indices),* ))
+            }
+            Fields::Unit => quote!(#mirror),
+        };
+
+        for ctx in &self.ctx_list {
+            out.extend(quote! {
+                #[automatically_derived]
+                impl #impl_generics #deku::DekuWriter<#ctx> for #target #where_clause {
+                    #[inline]
+                    fn to_writer<__W: #deku::no_std_io::Write + #deku::no_std_io::Seek>(
+                        &self,
+                        __deku_writer: &mut #deku::writer::Writer<__W>,
+                        __deku_ctx: #ctx,
+                    ) -> ::core::result::Result<(), #deku::DekuError> {
+                        let __dg_mirror = #construct;
+                        #deku::DekuWriter::<#ctx>::to_writer(&__dg_mirror, __deku_writer, __deku_ctx)
+                    }
+                }
+            });
+        }
+
+        out.extend(self.update_impl(&impl_generics)?);
+        if self.has_unit_ctx {
+            out.extend(self.container_write(&impl_generics));
+        }
+        Ok(out)
     }
 
-    out.extend(quote! {
-        #[automatically_derived]
-        impl #impl_generics #deku::DekuUpdate for #target #where_clause {
-            #[inline]
-            fn update(&mut self) -> ::core::result::Result<(), #deku::DekuError> {
-                #[allow(unused_imports)]
-                use ::core::convert::TryInto;
-                #(#updates)*
-                ::core::result::Result::Ok(())
+    /// `DekuUpdate` on the real struct, from the fields' `update = ".."`.
+    fn update_impl(&self, impl_generics: &TokenStream) -> syn::Result<TokenStream> {
+        let deku = &self.deku;
+        let target = &self.target;
+        let where_clause = self.where_clause;
+
+        let mut updates = Vec::new();
+        for f in &self.fields {
+            if let Some(expr) = attrs::field_update(f.attrs)? {
+                let access = if let Some(id) = f.ident {
+                    quote!(#id)
+                } else {
+                    let idx = &f.index;
+                    quote!(#idx)
+                };
+                updates.push(quote! {
+                    self.#access = (#expr).try_into()?;
+                });
             }
         }
-    });
 
-    if has_unit_ctx {
-        out.extend(quote! {
+        Ok(quote! {
+            #[automatically_derived]
+            impl #impl_generics #deku::DekuUpdate for #target #where_clause {
+                #[inline]
+                fn update(&mut self) -> ::core::result::Result<(), #deku::DekuError> {
+                    #[allow(unused_imports)]
+                    use ::core::convert::TryInto;
+                    #(#updates)*
+                    ::core::result::Result::Ok(())
+                }
+            }
+        })
+    }
+
+    /// `DekuContainerWrite` (all provided methods) and `TryFrom<Self> for Vec<u8>`.
+    fn container_write(&self, impl_generics: &TokenStream) -> TokenStream {
+        let deku = &self.deku;
+        let target = &self.target;
+        let where_clause = self.where_clause;
+        quote! {
             #[automatically_derived]
             impl #impl_generics #deku::DekuContainerWrite for #target #where_clause {}
 
@@ -672,70 +759,6 @@ fn emit_write(
                     }
                 }
             };
-        });
-    }
-
-    Ok(out)
-}
-
-/// Mirror attributes for a field. deku has no impls for `PhantomData`, so a
-/// `PhantomData<..>` field without any `#[deku(...)]` attribute of its own is
-/// treated as `#[deku(skip)]`: nothing is read or written for it.
-fn field_attrs_with_phantom(
-    f: &FieldInfo,
-    kind: MirrorKind,
-    field_names: &[String],
-) -> syn::Result<Vec<Attribute>> {
-    let mut fattrs = attrs::mirror_field_attrs(f.attrs, kind, field_names)?;
-    if fattrs.is_empty() && is_phantom_data(f.ty) {
-        fattrs.push(syn::parse_quote!(#[deku(skip)]));
-    }
-    Ok(fattrs)
-}
-
-fn is_phantom_data(ty: &Type) -> bool {
-    match ty {
-        Type::Path(p) => p
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "PhantomData"),
-        Type::Group(g) => is_phantom_data(&g.elem),
-        Type::Paren(p) => is_phantom_data(&p.elem),
-        _ => false,
-    }
-}
-
-/// `#[derive(deku::<derive>)] struct <name><generics> where .. { fields }`
-#[allow(clippy::too_many_arguments)]
-fn mirror_struct(
-    deku: &TokenStream,
-    derive: &str,
-    name: &Ident,
-    generics: &TokenStream,
-    where_clause: Option<&syn::WhereClause>,
-    shape: &Fields,
-    fields: &[TokenStream],
-    struct_deku_attrs: &[&Attribute],
-) -> TokenStream {
-    let derive = format_ident!("{}", derive);
-    let head = quote! {
-        #[derive(#deku::#derive)]
-        #(#struct_deku_attrs)*
-        #[allow(dead_code, non_camel_case_types, non_snake_case, clippy::all)]
-    };
-    match shape {
-        Fields::Named(_) => quote! {
-            #head
-            struct #name #generics #where_clause { #(#fields,)* }
-        },
-        Fields::Unnamed(_) => quote! {
-            #head
-            struct #name #generics ( #(#fields,)* ) #where_clause;
-        },
-        Fields::Unit => quote! {
-            #head
-            struct #name #generics #where_clause;
-        },
+        }
     }
 }

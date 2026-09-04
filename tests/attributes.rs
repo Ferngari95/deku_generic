@@ -1,6 +1,13 @@
 //! deku attribute coverage: every instantiation is compared against an
 //! equivalent non-generic `#[derive(DekuRead, DekuWrite)]` struct.
 
+#![expect(
+    missing_docs,
+    clippy::unwrap_used,
+    clippy::trivially_copy_pass_by_ref,
+    reason = "tests, not held to the library lints"
+)]
+
 use std::borrow::Cow;
 use std::marker::PhantomData;
 
@@ -230,8 +237,10 @@ fn const_generics_and_defaults() {
 
 // deku 0.20's own derive only supports lifetime-carrying structs when it does
 // not have to emit the container impls, i.e. with a `ctx`; same here.
-// (deku's `Cow` impl needs a sized `T: Clone`, hence `Cow<Vec<u8>>`.)
-#[allow(clippy::owned_cow)]
+#[expect(
+    clippy::owned_cow,
+    reason = "deku's Cow impl needs a sized T: Clone, so Cow<[u8]> is not an option"
+)]
 #[deku_generic]
 #[derive(Debug, PartialEq)]
 #[deku(ctx = "endian: Endian")]
@@ -411,7 +420,7 @@ fn attribute_form() {
     assert_eq!(b.to_bytes().unwrap(), [6]);
 }
 
-mod proto {
+pub mod proto {
     use std::marker::PhantomData;
 
     use deku_generic::deku_generic;
