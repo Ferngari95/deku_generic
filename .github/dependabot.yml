@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    # Lock-file bumps only; the version requirements in Cargo.toml are
+    # deliberately loose.
+    versioning-strategy: lockfile-only
