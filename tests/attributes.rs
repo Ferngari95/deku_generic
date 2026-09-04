@@ -445,3 +445,32 @@ fn cross_module_path() {
     };
     assert_eq!(b.to_bytes().unwrap(), [6]);
 }
+
+// ---------------------------------------------------------------------------
+// `crate = ".."`: deku_generic reachable only under another name
+// ---------------------------------------------------------------------------
+
+pub mod aliased {
+    pub use deku_generic as dg;
+}
+
+#[deku_generic(crate = "crate::aliased::dg", read(Renamed<A>))]
+#[derive(Debug, PartialEq)]
+struct Renamed<T> {
+    x: u8,
+    _s: PhantomData<T>,
+}
+
+// The helper macro remembers the path, so this needs no `crate` argument.
+impl_deku_write!(Renamed<B>);
+
+#[test]
+fn crate_override() {
+    let (_, v) = Renamed::<A>::from_bytes((&[5], 0)).unwrap();
+    assert_eq!(v.x, 5);
+    let b = Renamed::<B> {
+        x: 6,
+        _s: PhantomData,
+    };
+    assert_eq!(b.to_bytes().unwrap(), [6]);
+}

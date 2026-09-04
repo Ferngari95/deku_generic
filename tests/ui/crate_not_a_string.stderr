@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/crate_not_a_string.rs:4:24
+  |
+4 | #[deku_generic(crate = 4)]
+  |                        ^

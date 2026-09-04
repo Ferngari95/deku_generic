@@ -35,6 +35,11 @@ include = [
 [dependencies]
 # Exact version: the two crates are released in lock step.
 deku_generic_macros = { version = "=0.1.0", path = "deku_generic_macros" }
+# Re-exported for the generated code, so the impls and the traits they
+# implement come from the same deku version whatever the user's own deku
+# dependency looks like. Features stay minimal; the user's deku dependency
+# adds `std` or `bits` as needed and Cargo unifies them.
+deku = { version = "0.20", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 deku = "0.20"

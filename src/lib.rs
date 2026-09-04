@@ -86,6 +86,10 @@
 //! A `PhantomData<..>` field with no `#[deku]` attribute is treated as
 //! `#[deku(skip)]`; deku has no impl for `PhantomData`.
 //!
+//! The generated code refers to this crate as `::deku_generic`. If it is
+//! only reachable under another name, say so on the attribute:
+//! `#[deku_generic(crate = "my_reexports::deku_generic")]`.
+//!
 //! # `no_std`
 //!
 //! The crate is `#![no_std]`. The generated code needs `alloc` for
@@ -101,7 +105,10 @@
 //! Add deku's `bits` feature for `bits = ..` attributes. CI builds a check
 //! crate for `thumbv6m-none-eabi`.
 //!
-//! `deku_generic` 0.1 targets deku 0.20; edition 2024, MSRV 1.85.
+//! `deku_generic` 0.1 depends on deku 0.20 and the generated impls use that
+//! copy, so Cargo keeps the two in step: a deku of another major version in
+//! your own `Cargo.toml` shows up as a version mismatch rather than as an
+//! unexplained missing trait. Edition 2024, MSRV 1.85.
 //!
 //! # How it works
 //!
@@ -130,8 +137,8 @@
 //!   that can see the fields. The attribute form has no such restriction.
 //! * Field types must not mention `Self`, and concrete arguments must not
 //!   mention lifetimes other than `'static`.
-//! * `deku` must be a direct dependency; the generated code names it (a
-//!   rename in Cargo.toml is picked up).
+//! * `deku` still has to be a dependency of your crate: deku's own derive
+//!   runs on the hidden copy, and that derive finds deku by itself.
 //! * Writing goes through deku's `impl DekuWriter<Ctx> for &T`, which wants
 //!   `Ctx: Copy`. All of deku's own ctx types are.
 //! * Structs with lifetime parameters work as far as deku's derive does; in
@@ -145,6 +152,12 @@ pub use deku_generic_macros::{
 
 #[doc(hidden)]
 pub use deku_generic_macros::__deku_generic_impl;
+
+/// Used by the generated code. Not public API.
+#[doc(hidden)]
+pub mod __private {
+    pub use deku;
+}
 
 // Runs the README's code blocks as doctests.
 #[cfg(doctest)]

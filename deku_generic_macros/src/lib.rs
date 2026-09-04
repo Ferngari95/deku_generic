@@ -6,11 +6,11 @@ mod attrs;
 mod expand;
 
 use proc_macro::TokenStream;
-use proc_macro2::Span;
-use quote::{format_ident, quote};
+use proc_macro2::{Group, Span, TokenTree};
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, ItemStruct, Path, Token, parenthesized, parse_macro_input};
+use syn::{Ident, ItemStruct, LitStr, Path, Token, parenthesized, parse_macro_input};
 
 /// Which impls are being requested for one concrete instantiation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -27,7 +27,9 @@ impl Mode {
             "read_write" => Ok(vec![Mode::Read, Mode::Write]),
             other => Err(syn::Error::new(
                 ident.span(),
-                format!("unknown option `{other}`; expected `read`, `write` or `read_write`"),
+                format!(
+                    "unknown option `{other}`; expected `read`, `write`, `read_write` or `crate = \"..\"`"
+                ),
             )),
         }
     }
@@ -50,24 +52,46 @@ impl Parse for AttrGroup {
     }
 }
 
-/// The full argument list of `#[deku_generic(...)]`.
+/// The full argument list of `#[deku_generic(...)]`: any number of
+/// `read(..)`/`write(..)`/`read_write(..)` groups and at most one
+/// `crate = "path"`.
 struct AttrArgs {
-    groups: Punctuated<AttrGroup, Token![,]>,
+    groups: Vec<AttrGroup>,
+    crate_path: Option<Path>,
 }
 
 impl Parse for AttrArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        Ok(AttrArgs {
-            groups: input.parse_terminated(AttrGroup::parse, Token![,])?,
-        })
+        let mut args = AttrArgs {
+            groups: Vec::new(),
+            crate_path: None,
+        };
+        while !input.is_empty() {
+            if input.peek(Token![crate]) {
+                let kw: Token![crate] = input.parse()?;
+                if args.crate_path.is_some() {
+                    return Err(syn::Error::new(kw.span, "`crate` given more than once"));
+                }
+                input.parse::<Token![=]>()?;
+                let lit: LitStr = input.parse()?;
+                args.crate_path = Some(lit.parse_with(Path::parse_mod_style)?);
+            } else {
+                args.groups.push(input.parse()?);
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(args)
     }
 }
 
 /// Input of the hidden `__deku_generic_impl!` macro:
-/// `@read path::Foo<A, B> ; struct Foo<T, U> { .. }`
+/// `@read path::Foo<A, B> ; ::deku_generic ; struct Foo<T, U> { .. }`
 struct ImplInput {
     modes: Vec<Mode>,
     target: Path,
+    crate_path: Path,
     item: ItemStruct,
 }
 
@@ -78,10 +102,17 @@ impl Parse for ImplInput {
         let modes = Mode::from_ident(&mode)?;
         let target: Path = input.parse()?;
         input.parse::<Token![;]>()?;
+        // The path was transcribed by the helper `macro_rules!`, so its tokens
+        // carry that macro's hygiene context. deku's derive uses the span of
+        // its own path for the locals it generates, so give it the call site.
+        let crate_path = Path::parse_mod_style(input)?;
+        let crate_path: Path = syn::parse2(respan(quote!(#crate_path), Span::call_site()))?;
+        input.parse::<Token![;]>()?;
         let item: ItemStruct = input.parse()?;
         Ok(ImplInput {
             modes,
             target,
+            crate_path,
             item,
         })
     }
@@ -114,7 +145,8 @@ pub fn deku_generic(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         }
-        expand::attribute(&item, &requests)
+        let crate_path = args.crate_path.unwrap_or_else(default_crate_path);
+        expand::attribute(&item, &requests, &crate_path)
     });
 
     match expanded {
@@ -171,12 +203,13 @@ pub fn __deku_generic_impl(input: TokenStream) -> TokenStream {
     let ImplInput {
         modes,
         target,
+        crate_path,
         item,
     } = parse_macro_input!(input as ImplInput);
 
     let mut out = proc_macro2::TokenStream::new();
     for mode in modes {
-        match expand::instantiate(mode, &target, &item) {
+        match expand::instantiate(mode, &target, &item, &crate_path) {
             Ok(ts) => out.extend(ts),
             Err(e) => return e.into_compile_error().into(),
         }
@@ -184,23 +217,32 @@ pub fn __deku_generic_impl(input: TokenStream) -> TokenStream {
     out.into()
 }
 
-/// Path to the `deku` crate as seen from the user's crate.
-pub(crate) fn deku_path() -> proc_macro2::TokenStream {
-    crate_path("deku")
+fn respan(tokens: proc_macro2::TokenStream, span: Span) -> proc_macro2::TokenStream {
+    tokens
+        .into_iter()
+        .map(|tt| match tt {
+            TokenTree::Group(g) => {
+                let mut group = Group::new(g.delimiter(), respan(g.stream(), span));
+                group.set_span(span);
+                TokenTree::Group(group)
+            }
+            mut other => {
+                other.set_span(span);
+                other
+            }
+        })
+        .collect()
 }
 
-/// Path to the `deku_generic` crate as seen from the user's crate.
-pub(crate) fn self_path() -> proc_macro2::TokenStream {
-    crate_path("deku_generic")
+/// Where the generated code finds `deku_generic` unless the user said
+/// otherwise with `#[deku_generic(crate = "..")]`.
+fn default_crate_path() -> Path {
+    syn::parse_quote!(::deku_generic)
 }
 
-fn crate_path(name: &str) -> proc_macro2::TokenStream {
-    use proc_macro_crate::{FoundCrate, crate_name};
-    let ident = match crate_name(name) {
-        Ok(FoundCrate::Name(renamed)) => format_ident!("{}", renamed),
-        // `Itself` also covers integration tests and doctests of the crate
-        // itself, where it is still reachable under its own name.
-        Ok(FoundCrate::Itself) | Err(_) => format_ident!("{}", name),
-    };
-    quote!(::#ident)
+/// Path to the `deku` crate: the copy `deku_generic` depends on and
+/// re-exports, so that the generated impls and the traits they implement
+/// always come from the same deku version.
+pub(crate) fn deku_path(crate_path: &Path) -> proc_macro2::TokenStream {
+    quote!(#crate_path::__private::deku)
 }

@@ -32,7 +32,11 @@ pub(crate) fn helper_ident(ident: &Ident) -> Ident {
 }
 
 /// Expansion of the `#[deku_generic(...)]` attribute.
-pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Result<TokenStream> {
+pub(crate) fn attribute(
+    item: &ItemStruct,
+    requests: &[(Mode, Path)],
+    crate_path: &Path,
+) -> syn::Result<TokenStream> {
     // Validate everything here rather than in the instantiations, so that
     // errors point at the attribute and not into a helper macro expansion.
     attrs::parse_struct_attrs(&item.attrs)?;
@@ -53,7 +57,7 @@ pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Re
     let captured = only_deku_attrs(item);
     let real = without_deku_attrs(item);
     let helper = helper_ident(&item.ident);
-    let dg = crate::self_path();
+    let dg = crate_path;
 
     let mut out = quote! {
         #real
@@ -62,7 +66,7 @@ pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Re
         #[allow(unused_macros)]
         macro_rules! #helper {
             ($($args:tt)*) => {
-                #dg::__deku_generic_impl! { $($args)* ; #captured }
+                #dg::__deku_generic_impl! { $($args)* ; #dg ; #captured }
             };
         }
         #[doc(hidden)]
@@ -71,7 +75,7 @@ pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Re
     };
 
     for (mode, target) in requests {
-        out.extend(instantiate(*mode, target, &captured)?);
+        out.extend(instantiate(*mode, target, &captured, crate_path)?);
     }
     Ok(out)
 }
@@ -120,6 +124,7 @@ pub(crate) fn instantiate(
     mode: Mode,
     target: &Path,
     item: &ItemStruct,
+    crate_path: &Path,
 ) -> syn::Result<TokenStream> {
     let last = target
         .segments
@@ -138,7 +143,7 @@ pub(crate) fn instantiate(
     let target = normalise_target(target, &lifetime_params, &other_args);
     let (outer_aliases, inner_aliases) = alias_items(last, item, &other_args)?;
 
-    let instance = Instance::new(target, item, lifetime_params)?;
+    let instance = Instance::new(target, item, lifetime_params, crate_path)?;
     let body = match mode {
         Mode::Read => instance.read()?,
         Mode::Write => instance.write()?,
@@ -445,6 +450,7 @@ impl<'a> Instance<'a> {
         target: Path,
         item: &'a ItemStruct,
         lifetime_params: Vec<&'a LifetimeParam>,
+        crate_path: &Path,
     ) -> syn::Result<Self> {
         let fields: Vec<FieldInfo<'a>> = item
             .fields
@@ -467,7 +473,7 @@ impl<'a> Instance<'a> {
         }
 
         Ok(Instance {
-            deku: crate::deku_path(),
+            deku: crate::deku_path(crate_path),
             target,
             item,
             fields,

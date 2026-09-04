@@ -1,0 +1,5 @@
+error: `crate` given more than once
+ --> tests/ui/crate_twice.rs:4:40
+  |
+4 | #[deku_generic(crate = "deku_generic", crate = "deku_generic")]
+  |                                        ^^^^^

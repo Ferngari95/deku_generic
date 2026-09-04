@@ -62,6 +62,10 @@ pub struct Foo<T> { .. }
 carry no `#[deku]` attribute are treated as `#[deku(skip)]`, since deku has
 no impl for `PhantomData` and you'd have to write that yourself otherwise.
 
+The generated code refers to this crate as `::deku_generic`. If it is only
+reachable under another name, add `crate = "path::to::deku_generic"` to the
+attribute.
+
 ## no_std
 
 The crate is `#![no_std]`. The generated code needs `alloc` for `Vec<u8>`
@@ -79,7 +83,10 @@ There is a `no_std_check` crate in the repository that CI builds for
 
 ## Versions
 
-deku_generic 0.1 targets deku 0.20. Edition 2024, MSRV 1.85.
+deku_generic 0.1 depends on deku 0.20 and the generated impls use that copy,
+so Cargo keeps the two in step: a deku of another major version in your own
+`Cargo.toml` shows up as a version mismatch, not as a missing trait.
+Edition 2024, MSRV 1.85.
 
 ## How it works
 
@@ -115,8 +122,8 @@ and type parameter defaults.
   lifetimes other than `'static`.
 - Structs with lifetime parameters work as far as deku's derive supports
   them, which in 0.20 means they need a `ctx`.
-- `deku` has to be a direct dependency of your crate; the generated code
-  refers to it by name (a rename in Cargo.toml is picked up).
+- `deku` still has to be a dependency of your crate: deku's own derive runs
+  on the hidden copy, and that derive finds deku by itself.
 
 ## Layout
 
