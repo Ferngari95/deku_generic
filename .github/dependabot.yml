@@ -11,3 +11,9 @@ updates:
     # Lock-file bumps only; the version requirements in Cargo.toml are
     # deliberately loose.
     versioning-strategy: lockfile-only
+    # A new major of a dependency is a manual decision. syn 3 in
+    # particular waits until deku's derive (via darling) is on it, or
+    # users would build both.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
