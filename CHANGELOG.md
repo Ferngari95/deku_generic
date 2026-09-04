@@ -11,5 +11,10 @@ First release.
 - Type parameters (defaults honoured), const parameters, lifetime parameters,
   tuple structs, where clauses. All deku attributes except `temp`.
 - `PhantomData` fields without deku attributes are skipped.
-- Works under `#![no_std]` with `alloc`. Targets deku 0.20. Edition 2024,
-  MSRV 1.85.
+- `crate = ".."` on the attribute, for when `deku_generic` is reachable under
+  another name.
+- Depends on deku 0.20 and re-exports it for the generated code, so the
+  impls always match the deku version this crate was built against. Your
+  crate still needs `deku` under that name for deku's own derive.
+- A rejected struct is still emitted, so one mistake gives one error.
+- Works under `#![no_std]` with `alloc`. Edition 2024, MSRV 1.85.

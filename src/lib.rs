@@ -120,7 +120,9 @@
 //! fields into `Foo`, writing builds a copy whose fields borrow `&self`,
 //! which deku can write because it implements `DekuWriter` for `&T`. deku
 //! evaluates all attributes itself, so their semantics are whatever deku's
-//! are.
+//! are. The impls name deku through a hidden re-export from this crate's own
+//! deku dependency; the derive on the copy is deku's and finds deku by
+//! itself.
 //!
 //! deku exposes sibling fields to write-side expressions (`cond`, `assert`,
 //! `assert_eq`, `ctx`, `writer`, ..) as `&T` locals named after the field.

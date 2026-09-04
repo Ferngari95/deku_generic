@@ -98,7 +98,10 @@ same fields and the same `#[deku(..)]` attributes. deku's own derive runs on
 that copy. The impls for `Foo<Unvalidated>` delegate to it: on the read side
 the copy's fields are moved into `Foo`, on the write side a copy whose fields
 are `&`-references into `self` is built and written, which works because
-deku implements `DekuWriter` for `&T`.
+deku implements `DekuWriter` for `&T`. Those impls name deku through a
+hidden re-export from this crate's own deku dependency, so they are always
+compiled against the deku version this crate was written for. The derive on
+the copy is deku's, and it locates deku by itself.
 
 One wrinkle on the write side: deku hands attribute expressions (`cond`,
 `assert`, `assert_eq`, `ctx`, `writer`, ..) the sibling fields as `&T`
@@ -133,7 +136,9 @@ and type parameter defaults.
 - `no_std_check`: not published, bare-metal build check.
 
 `cargo test` at the root runs everything, including this README's code
-blocks.
+blocks. The compile-fail cases in `tests/ui` compare against `.stderr`
+snapshots; after changing a diagnostic, `TRYBUILD=overwrite cargo test
+--test ui` rewrites them.
 
 ## Releasing
 
