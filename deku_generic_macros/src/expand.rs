@@ -218,10 +218,9 @@ fn normalise_target(
 
 /// Alias items binding each type/const parameter name to its argument.
 ///
-/// Two levels: the outer block binds `__DekuGenericArgN` to the argument as
-/// written by the caller, the inner block binds the parameter name to that.
-/// Doing it in one step would break when an argument is spelled the same as
-/// the parameter (`type State = State;`).
+/// Goes through an intermediate name (`__DekuGenericArgN`) in an outer
+/// block, because a direct `type State = State;` is a cycle whenever the
+/// caller's argument happens to be spelled like the parameter.
 fn alias_items(
     last: &PathSegment,
     item: &ItemStruct,

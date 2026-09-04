@@ -1,15 +1,13 @@
 # deku_generic
 
-Not on crates.io yet; use it as a git dependency for now:
+Implements [deku](https://docs.rs/deku)'s `DekuReader`, `DekuWriter` and the
+container traits for particular instantiations of a generic struct, rather
+than for every `T`. Not on crates.io yet, so for now:
 
 ```toml
 [dependencies]
 deku_generic = { git = "https://github.com/Ferngari95/deku_generic" }
 ```
-
-Implements [deku](https://docs.rs/deku)'s `DekuReader`, `DekuWriter` and the
-container traits for particular instantiations of a generic struct, rather
-than for every `T`.
 
 `#[derive(DekuRead)]` on `struct Foo<T>` gives you `impl<T> DekuReader for Foo<T>`.
 When `T` is a typestate marker that is usually the wrong thing: a

@@ -42,8 +42,8 @@ deku = "0.20"
 [lints]
 workspace = true
 
-# Levels are `warn` on purpose: CI runs with `-D warnings`, local builds stay
-# usable, and a toolchain that adds a lint does not break `git` users.
+# warn rather than deny. CI passes -D warnings anyway, and a newer toolchain
+# that grows a lint shouldn't break people building this from git.
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
@@ -96,8 +96,8 @@ renamed_function_params = "warn"
 redundant_type_annotations = "warn"
 unnecessary_safety_doc = "warn"
 non_ascii_literal = "warn"
-# `#[expect(.., reason = "..")]` instead of `#[allow]`, so suppressions
-# carry a justification and go stale loudly.
+# expect instead of allow: it needs a reason, and it errors once the lint
+# it was written for no longer fires.
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 
