@@ -137,8 +137,8 @@
 //!   that can see the fields. The attribute form has no such restriction.
 //! * Field types must not mention `Self`, and concrete arguments must not
 //!   mention lifetimes other than `'static`.
-//! * `deku` still has to be a dependency of your crate: deku's own derive
-//!   runs on the hidden copy, and that derive finds deku by itself.
+//! * `deku` still has to be a dependency of your crate, under that name:
+//!   deku's own derive runs on the hidden copy, and its output names `deku`.
 //! * Writing goes through deku's `impl DekuWriter<Ctx> for &T`, which wants
 //!   `Ctx: Copy`. All of deku's own ctx types are.
 //! * Structs with lifetime parameters work as far as deku's derive does; in

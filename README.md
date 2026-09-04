@@ -122,8 +122,8 @@ and type parameter defaults.
   lifetimes other than `'static`.
 - Structs with lifetime parameters work as far as deku's derive supports
   them, which in 0.20 means they need a `ctx`.
-- `deku` still has to be a dependency of your crate: deku's own derive runs
-  on the hidden copy, and that derive finds deku by itself.
+- `deku` still has to be a dependency of your crate, under that name: deku's
+  own derive runs on the hidden copy, and its output names `deku`.
 
 ## Layout
 
@@ -141,7 +141,11 @@ Both crates carry `publish = false` until the first release. To release:
 remove those two lines, bump `workspace.package.version` and the `=x.y.z`
 pin in the root `Cargo.toml`, update `CHANGELOG.md`, put the crates.io
 badges back, then `cargo publish -p deku_generic_macros` followed by
-`cargo publish -p deku_generic`.
+`cargo publish -p deku_generic`. The macros crate has to be on crates.io
+before the facade can even be packaged, so `cargo publish --dry-run` only
+covers the first of the two; run it for the facade after the macros are up.
+From the second release on, `cargo semver-checks` against the previous
+version is worth a CI job.
 
 ## License
 
