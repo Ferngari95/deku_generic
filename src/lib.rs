@@ -95,7 +95,7 @@
 //! ```toml
 //! [dependencies]
 //! deku = { version = "0.20", default-features = false, features = ["alloc"] }
-//! deku_generic = "0.1"
+//! deku_generic = { git = "https://github.com/Ferngari95/deku_generic" }
 //! ```
 //!
 //! Add deku's `bits` feature for `bits = ..` attributes. CI builds a check

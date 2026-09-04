@@ -11,6 +11,8 @@ repository = "https://github.com/Ferngari95/deku_generic"
 
 [package]
 name = "deku_generic"
+# Not ready for crates.io yet; remove this line to allow `cargo publish`.
+publish = false
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

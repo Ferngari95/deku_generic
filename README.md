@@ -1,7 +1,11 @@
 # deku_generic
 
-[![crates.io](https://img.shields.io/crates/v/deku_generic.svg)](https://crates.io/crates/deku_generic)
-[![docs.rs](https://docs.rs/deku_generic/badge.svg)](https://docs.rs/deku_generic)
+Not on crates.io yet; use it as a git dependency for now:
+
+```toml
+[dependencies]
+deku_generic = { git = "https://github.com/Ferngari95/deku_generic" }
+```
 
 Implements [deku](https://docs.rs/deku)'s `DekuReader`, `DekuWriter` and the
 container traits for particular instantiations of a generic struct, rather
@@ -69,7 +73,7 @@ and enable `alloc`; add `bits` if you use `bits = ..`:
 ```toml
 [dependencies]
 deku = { version = "0.20", default-features = false, features = ["alloc"] }
-deku_generic = "0.1"
+deku_generic = { git = "https://github.com/Ferngari95/deku_generic" }
 ```
 
 There is a `no_std_check` crate in the repository that CI builds for
@@ -128,9 +132,10 @@ blocks.
 
 ## Releasing
 
-Bump `workspace.package.version` and the `=x.y.z` pin in the root
-`Cargo.toml`, update `CHANGELOG.md`, then
-`cargo publish -p deku_generic_macros` followed by
+Both crates carry `publish = false` until the first release. To release:
+remove those two lines, bump `workspace.package.version` and the `=x.y.z`
+pin in the root `Cargo.toml`, update `CHANGELOG.md`, put the crates.io
+badges back, then `cargo publish -p deku_generic_macros` followed by
 `cargo publish -p deku_generic`.
 
 ## License
