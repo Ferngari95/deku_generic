@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Proc-macro implementation for the deku_generic crate; do not depend on this directly"
 readme = "README.md"
 documentation = "https://docs.rs/deku_generic"

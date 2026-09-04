@@ -7,8 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-# Fill in before publishing, e.g. "https://github.com/<you>/deku_generic".
-# repository = ""
+repository = "https://github.com/Ferngari95/deku_generic"
 
 [package]
 name = "deku_generic"
@@ -16,6 +15,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Implement deku's read/write traits for concrete instantiations of a generic struct (typestate-friendly, no_std + alloc)"
 readme = "README.md"
 documentation = "https://docs.rs/deku_generic"
