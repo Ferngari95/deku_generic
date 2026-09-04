@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Only the macros crate can be packaged here: packaging deku_generic
+      # resolves its `=x.y.z` dependency against crates.io, which only works
+      # once deku_generic_macros has been published.
       - run: cargo package -p deku_generic_macros
-      # The facade depends on the (unpublished) macros crate, so only check
-      # that it packages; `--no-verify` skips the build against crates.io.
-      - run: cargo package -p deku_generic --no-verify

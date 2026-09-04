@@ -23,6 +23,7 @@ keywords = ["deku", "typestate", "serialization", "binary", "no-std"]
 categories = ["encoding", "parsing", "no-std"]
 include = [
     "src/**",
+    "tests/**",
     "README.md",
     "CHANGELOG.md",
     "LICENSE-MIT",
