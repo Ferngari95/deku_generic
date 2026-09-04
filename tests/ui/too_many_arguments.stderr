@@ -1,0 +1,5 @@
+error: `Foo` has 1 type/const parameter(s), but 2 were given
+  --> tests/ui/too_many_arguments.rs:12:17
+   |
+12 | impl_deku_read!(Foo<Raw, u8>);
+   |                 ^^^^^^^^^^^^

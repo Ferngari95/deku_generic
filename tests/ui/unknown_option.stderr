@@ -1,0 +1,5 @@
+error: unknown option `parse`; expected `read`, `write` or `read_write`
+ --> tests/ui/unknown_option.rs:6:16
+  |
+6 | #[deku_generic(parse(Foo<Raw>))]
+  |                ^^^^^

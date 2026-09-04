@@ -1,0 +1,5 @@
+error: `update` expects a string
+ --> tests/ui/update_not_a_string.rs:8:12
+  |
+8 |     #[deku(update = 3)]
+  |            ^^^^^^^^^^

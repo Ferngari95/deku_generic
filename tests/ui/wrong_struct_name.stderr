@@ -1,0 +1,5 @@
+error: expected `Foo`, found `Bar`
+ --> tests/ui/wrong_struct_name.rs:6:21
+  |
+6 | #[deku_generic(read(Bar<Raw>))]
+  |                     ^^^

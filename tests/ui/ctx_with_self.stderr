@@ -1,0 +1,5 @@
+error: `self` is not allowed in a deku `ctx`
+ --> tests/ui/ctx_with_self.rs:7:14
+  |
+7 | #[deku(ctx = "self, n: usize")]
+  |              ^^^^^^^^^^^^^^^^

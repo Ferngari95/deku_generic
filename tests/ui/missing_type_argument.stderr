@@ -1,0 +1,5 @@
+error: missing argument for type parameter `T`
+  --> tests/ui/missing_type_argument.rs:10:17
+   |
+10 | impl_deku_read!(Foo);
+   |                 ^^^

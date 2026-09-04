@@ -1,0 +1,5 @@
+error: unexpected token
+  --> tests/ui/parenthesized_arguments.rs:12:20
+   |
+12 | impl_deku_read!(Foo(Raw));
+   |                    ^^^^^

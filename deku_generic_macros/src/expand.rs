@@ -33,10 +33,22 @@ pub(crate) fn helper_ident(ident: &Ident) -> Ident {
 
 /// Expansion of the `#[deku_generic(...)]` attribute.
 pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Result<TokenStream> {
+    // Validate everything here rather than in the instantiations, so that
+    // errors point at the attribute and not into a helper macro expansion.
+    attrs::parse_struct_attrs(&item.attrs)?;
+    let field_names: Vec<String> = item
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(i, f)| FieldInfo::new(i, f).deku_name)
+        .collect();
     for field in &item.fields {
         attrs::check_field_supported(&field.attrs)?;
+        attrs::field_update(&field.attrs)?;
+        for kind in [MirrorKind::Read, MirrorKind::Write] {
+            attrs::mirror_field_attrs(&field.attrs, kind, &field_names)?;
+        }
     }
-    attrs::parse_struct_attrs(&item.attrs)?;
 
     let captured = only_deku_attrs(item);
     let real = without_deku_attrs(item);
@@ -62,6 +74,27 @@ pub(crate) fn attribute(item: &ItemStruct, requests: &[(Mode, Path)]) -> syn::Re
         out.extend(instantiate(*mode, target, &captured)?);
     }
     Ok(out)
+}
+
+/// What `#[deku_generic]` emits when it has reported an error: the struct
+/// itself, and a helper macro that expands to nothing so that
+/// `impl_deku_*!` calls for it do not add a second error about a missing
+/// macro.
+pub(crate) fn fallback(item: &ItemStruct) -> TokenStream {
+    let real = without_deku_attrs(item);
+    let helper = helper_ident(&item.ident);
+    quote! {
+        #real
+
+        #[doc(hidden)]
+        #[allow(unused_macros)]
+        macro_rules! #helper {
+            ($($args:tt)*) => {};
+        }
+        #[doc(hidden)]
+        #[allow(unused_imports)]
+        pub(crate) use #helper;
+    }
 }
 
 fn only_deku_attrs(item: &ItemStruct) -> ItemStruct {

@@ -1,0 +1,5 @@
+error: `ctx` expects a string
+ --> tests/ui/ctx_not_a_string.rs:7:8
+  |
+7 | #[deku(ctx = 4)]
+  |        ^^^^^^^

@@ -1,0 +1,5 @@
+error: `Foo` has 1 lifetime parameter(s), but 2 were given
+  --> tests/ui/lifetime_count.rs:14:17
+   |
+14 | impl_deku_read!(Foo<'a, 'b, Raw>);
+   |                 ^^^^^^^^^^^^^^^^

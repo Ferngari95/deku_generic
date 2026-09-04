@@ -1,0 +1,5 @@
+error: lifetime must be written as `'a` (the struct's own name) or `'_`, or omitted
+  --> tests/ui/lifetime_name.rs:14:21
+   |
+14 | impl_deku_read!(Foo<'static, Raw>);
+   |                     ^^^^^^^

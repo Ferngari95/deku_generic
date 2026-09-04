@@ -1,0 +1,5 @@
+error: expected identifier
+ --> tests/ui/not_a_path.rs:3:17
+  |
+3 | impl_deku_read!(42);
+  |                 ^^

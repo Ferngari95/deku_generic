@@ -186,19 +186,19 @@ fn rewrite_for_write(meta: Meta, name: &str, field_names: &[String]) -> syn::Res
     let value = lit.value();
 
     let new_value = if WRITE_EXPR_ATTRS.contains(&name) {
-        wrap_expr(&value, field_names, "")?
+        wrap_expr(lit, &value, field_names, "")?
     } else if name == "assert_eq" {
         // deku emits `*(field) == (value)`; `field` is `&&T` on the mirror,
         // so `*(field)` is `&T` and the value must be a `&T` as well.
-        format!("&({})", wrap_expr(&value, field_names, "")?)
+        format!("&({})", wrap_expr(lit, &value, field_names, "")?)
     } else if name == "endian" && value != "big" && value != "little" {
-        wrap_expr(&value, field_names, "")?
+        wrap_expr(lit, &value, field_names, "")?
     } else if name == "ctx" {
         let exprs = lit.parse_with(Punctuated::<Expr, Token![,]>::parse_terminated)?;
         let mut parts = Vec::new();
         for e in exprs {
             let text = quote::quote!(#e).to_string();
-            parts.push(wrap_expr(&text, field_names, "")?);
+            parts.push(wrap_expr(lit, &text, field_names, "")?);
         }
         parts.join(", ")
     } else {
@@ -213,8 +213,21 @@ fn rewrite_for_write(meta: Meta, name: &str, field_names: &[String]) -> syn::Res
 }
 
 /// `expr` -> `prefix{ let a = *a; (expr) }` for every field `a` mentioned.
-fn wrap_expr(expr: &str, field_names: &[String], prefix: &str) -> syn::Result<String> {
-    let tokens: TokenStream = expr.parse()?;
+///
+/// `lit` is the attribute value `expr` came from, for error spans.
+fn wrap_expr(
+    lit: &LitStr,
+    expr: &str,
+    field_names: &[String],
+    prefix: &str,
+) -> syn::Result<String> {
+    // The lexer's own message is never more specific than "cannot parse".
+    let tokens: TokenStream = expr.parse().ok().ok_or_else(|| {
+        syn::Error::new(
+            lit.span(),
+            format!("cannot parse `{expr}` as an expression"),
+        )
+    })?;
     let mut used = Vec::new();
     collect_idents(&tokens, &mut used);
     let rebinds: Vec<String> = field_names

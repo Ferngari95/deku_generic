@@ -93,21 +93,38 @@ impl Parse for ImplInput {
 /// See the `deku_generic` crate documentation for details.
 #[proc_macro_attribute]
 pub fn deku_generic(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as AttrArgs);
-    let item = parse_macro_input!(item as ItemStruct);
+    // On any error the struct is still emitted (minus its deku attributes),
+    // so the rest of the crate keeps type-checking and the user sees one
+    // error instead of a cascade.
+    let raw = proc_macro2::TokenStream::from(item.clone());
+    let item: ItemStruct = match syn::parse(item) {
+        Ok(item) => item,
+        Err(e) => {
+            let err = e.into_compile_error();
+            return quote! { #err #raw }.into();
+        }
+    };
 
-    let mut requests: Vec<(Mode, Path)> = Vec::new();
-    for group in args.groups {
-        for target in group.targets {
-            for mode in &group.modes {
-                requests.push((*mode, target.clone()));
+    let expanded = syn::parse::<AttrArgs>(attr).and_then(|args| {
+        let mut requests: Vec<(Mode, Path)> = Vec::new();
+        for group in args.groups {
+            for target in group.targets {
+                for mode in &group.modes {
+                    requests.push((*mode, target.clone()));
+                }
             }
         }
-    }
+        expand::attribute(&item, &requests)
+    });
 
-    expand::attribute(&item, &requests)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
+    match expanded {
+        Ok(ts) => ts.into(),
+        Err(e) => {
+            let err = e.into_compile_error();
+            let fallback = expand::fallback(&item);
+            quote! { #err #fallback }.into()
+        }
+    }
 }
 
 /// Implement `DekuReader`, `DekuContainerRead` and `TryFrom<&[u8]>` for a

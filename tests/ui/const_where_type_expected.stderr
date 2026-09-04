@@ -1,0 +1,5 @@
+error: expected a type for parameter `T`
+  --> tests/ui/const_where_type_expected.rs:10:21
+   |
+10 | impl_deku_read!(Foo<{ 4 }>);
+   |                     ^^^^^

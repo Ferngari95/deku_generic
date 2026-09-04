@@ -1,0 +1,5 @@
+error: missing argument for const parameter `N`
+ --> tests/ui/missing_const_argument.rs:8:17
+  |
+8 | impl_deku_read!(Buf);
+  |                 ^^^

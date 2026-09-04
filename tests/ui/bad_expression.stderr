@@ -1,0 +1,5 @@
+error: cannot parse `a == (1` as an expression
+ --> tests/ui/bad_expression.rs:6:19
+  |
+6 |     #[deku(cond = "a == (1")]
+  |                   ^^^^^^^^^

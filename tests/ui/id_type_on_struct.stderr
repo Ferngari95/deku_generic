@@ -1,0 +1,5 @@
+error: deku_generic only supports structs; enum attributes are not allowed
+ --> tests/ui/id_type_on_struct.rs:7:8
+  |
+7 | #[deku(id_type = "u8")]
+  |        ^^^^^^^^^^^^^^

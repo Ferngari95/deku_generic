@@ -38,6 +38,7 @@ deku_generic_macros = { version = "=0.1.0", path = "deku_generic_macros" }
 
 [dev-dependencies]
 deku = "0.20"
+trybuild = "1.0"
 
 [lints]
 workspace = true

@@ -1,0 +1,5 @@
+error: `#[deku(temp)]` fields are not supported by deku_generic
+ --> tests/ui/temp_field.rs:8:12
+  |
+8 |     #[deku(temp)]
+  |            ^^^^
